@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"fmt"
 	"log"
@@ -31,6 +32,7 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	_ "net/http/pprof"
 )
@@ -161,6 +163,12 @@ func main() {
 		common.SysError(fmt.Sprintf("start pyroscope error : %v", err))
 	}
 
+	if os.Getenv("OTEL_DISABLED") != "true" {
+		if err := common.InitOtel(context.Background()); err != nil {
+			common.SysError("otel init failed: " + err.Error())
+		}
+	}
+
 	// Initialize HTTP server
 	server := gin.New()
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
@@ -174,6 +182,9 @@ func main() {
 	}))
 	// This will cause SSE not to work!!!
 	//server.Use(gzip.Gzip(gzip.DefaultCompression))
+	if os.Getenv("OTEL_DISABLED") != "true" {
+		server.Use(otelgin.Middleware("new-api"))
+	}
 	server.Use(middleware.RequestId())
 	server.Use(middleware.PoweredBy())
 	server.Use(middleware.I18n())

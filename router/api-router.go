@@ -397,6 +397,17 @@ func SetApiRouter(router *gin.Engine) {
 			billingRoute.POST("/channel-pricing", controller.CreateChannelPricing)
 			billingRoute.PUT("/channel-pricing/:id", controller.UpdateChannelPricing)
 			billingRoute.DELETE("/channel-pricing/:id", controller.DeleteChannelPricing)
+
+			// Admin job state read (admin)
+			billingRoute.GET("/admin/job/runs", controller.ListBillingJobRuns)
+		}
+
+		// Billing job mutate endpoints require Root (rerun + backfill)
+		billingRootRoute := apiRouter.Group("/billing/admin/job")
+		billingRootRoute.Use(middleware.RootAuth())
+		{
+			billingRootRoute.POST("/rerun", controller.RerunBillingJob)
+			billingRootRoute.POST("/backfill", controller.BackfillBillingJob)
 		}
 	}
 }

@@ -2,11 +2,13 @@ package controller
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm/clause"
 )
 
 func ListChannelPricing(c *gin.Context) {
@@ -127,4 +129,78 @@ func DeleteChannelPricing(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, nil)
+}
+
+// --- Billing Job Admin Endpoints ---
+
+type rerunJobReq struct {
+	StatDate string `json:"stat_date" binding:"required"`
+}
+
+func RerunBillingJob(c *gin.Context) {
+	var req rerunJobReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	res := model.DB.Model(&model.BillingJobRun{}).
+		Where("stat_date = ? AND job_kind = ?", req.StatDate, model.BillingJobKindDailyFull).
+		Updates(map[string]any{"status": model.BillingJobStatusPending, "attempt": 0, "error_msg": ""})
+	if res.Error != nil {
+		common.ApiError(c, res.Error)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"affected": res.RowsAffected})
+}
+
+type backfillReq struct {
+	StartDate string `json:"start_date" binding:"required"`
+	EndDate   string `json:"end_date"   binding:"required"`
+}
+
+func BackfillBillingJob(c *gin.Context) {
+	var req backfillReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	start, err1 := time.ParseInLocation("2006-01-02", req.StartDate, loc)
+	end, err2 := time.ParseInLocation("2006-01-02", req.EndDate, loc)
+	if err1 != nil || err2 != nil {
+		common.ApiErrorMsg(c, "invalid date format, use YYYY-MM-DD")
+		return
+	}
+	days := int(end.Sub(start).Hours()/24) + 1
+	if days <= 0 || days > 90 {
+		common.ApiErrorMsg(c, "range must be 1..90 days")
+		return
+	}
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		rec := model.BillingJobRun{
+			StatDate: d.Format("2006-01-02"),
+			JobKind:  model.BillingJobKindBackfill,
+			Status:   model.BillingJobStatusPending,
+		}
+		model.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&rec)
+	}
+	common.ApiSuccess(c, gin.H{"days_scheduled": days})
+}
+
+func ListBillingJobRuns(c *gin.Context) {
+	start := c.Query("start")
+	end := c.Query("end")
+	q := model.DB.Model(&model.BillingJobRun{})
+	if start != "" {
+		q = q.Where("stat_date >= ?", start)
+	}
+	if end != "" {
+		q = q.Where("stat_date <= ?", end)
+	}
+	var rows []model.BillingJobRun
+	if err := q.Order("stat_date desc").Limit(500).Find(&rows).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rows)
 }

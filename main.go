@@ -167,6 +167,7 @@ func main() {
 		if err := common.InitOtel(context.Background()); err != nil {
 			common.SysError("otel init failed: " + err.Error())
 		}
+		service.InitBillingMetrics()
 	}
 
 	// Initialize HTTP server

@@ -193,6 +193,9 @@ func runDailyFullJob(statDate string, runRec *model.BillingJobRun, kind string) 
 			finishJobFailed(runRec, "insert bill_daily_full: "+err.Error())
 			return
 		}
+		if missing {
+			incrementCostMissing(ctx)
+		}
 		inserted++
 	}
 
@@ -209,6 +212,7 @@ func finishJobFailed(r *model.BillingJobRun, msg string) {
 	r.FinishedAt = time.Now().UnixMilli()
 	r.ErrorMsg = msg
 	model.DB.Save(r)
+	incrementJobFailure(context.Background(), r.StatDate)
 	logger.LogError(context.Background(), "billing job failed: "+msg)
 }
 

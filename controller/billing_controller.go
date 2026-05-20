@@ -10,8 +10,20 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm/clause"
 )
+
+var billingTracer = otel.Tracer("billing")
+
+// startBillingSpan opens a span on the request context and rebinds it back to
+// the gin context so downstream service calls inherit the trace.
+func startBillingSpan(c *gin.Context, name string) trace.Span {
+	ctx, span := billingTracer.Start(c.Request.Context(), name)
+	c.Request = c.Request.WithContext(ctx)
+	return span
+}
 
 func ListChannelPricing(c *gin.Context) {
 	channelId, _ := strconv.Atoi(c.Query("channel_id"))
@@ -140,6 +152,8 @@ type rerunJobReq struct {
 }
 
 func RerunBillingJob(c *gin.Context) {
+	span := startBillingSpan(c, "RerunBillingJob")
+	defer span.End()
 	var req rerunJobReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiErrorMsg(c, err.Error())
@@ -212,6 +226,8 @@ func ListBillingJobRuns(c *gin.Context) {
 // GetUserBillDaily — current user's daily bill rows.
 // user_id is bound to the session; any query-string user_id is ignored (AC-7).
 func GetUserBillDaily(c *gin.Context) {
+	span := startBillingSpan(c, "GetUserBillDaily")
+	defer span.End()
 	userId := c.GetInt("id")
 	if userId <= 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "unauthorized"})
@@ -269,6 +285,8 @@ func GetAdminUserBillMonthly(c *gin.Context) {
 }
 
 func GetChannelBillDaily(c *gin.Context) {
+	span := startBillingSpan(c, "GetChannelBillDaily")
+	defer span.End()
 	channelId, _ := strconv.Atoi(c.Query("channel_id"))
 	if channelId <= 0 {
 		common.ApiErrorMsg(c, "channel_id required")
@@ -315,6 +333,8 @@ func parseFullParams(c *gin.Context) service.QueryFullParams {
 }
 
 func GetFullBillDaily(c *gin.Context) {
+	span := startBillingSpan(c, "GetFullBillDaily")
+	defer span.End()
 	p := parseFullParams(c)
 	rows, total, err := service.QueryFullDailyBill(p)
 	if err != nil {
@@ -338,6 +358,8 @@ func GetFullBillMonthly(c *gin.Context) {
 // --- CSV export ---
 
 func ExportBillCSV(c *gin.Context) {
+	span := startBillingSpan(c, "ExportBillCSV")
+	defer span.End()
 	scope := c.Query("scope")
 	if scope == "" {
 		scope = service.CSVScopeAdminFull

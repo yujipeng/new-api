@@ -387,5 +387,16 @@ func SetApiRouter(router *gin.Engine) {
 			deploymentsRoute.POST("/:id/extend", controller.ExtendDeployment)
 			deploymentsRoute.DELETE("/:id", controller.DeleteDeployment)
 		}
+
+		// Billing: channel pricing CRUD (admin only)
+		billingRoute := apiRouter.Group("/billing")
+		billingRoute.Use(middleware.AdminAuth())
+		{
+			billingRoute.GET("/channel-pricing", controller.ListChannelPricing)
+			billingRoute.GET("/channel-pricing/:id", controller.GetChannelPricingById)
+			billingRoute.POST("/channel-pricing", controller.CreateChannelPricing)
+			billingRoute.PUT("/channel-pricing/:id", controller.UpdateChannelPricing)
+			billingRoute.DELETE("/channel-pricing/:id", controller.DeleteChannelPricing)
+		}
 	}
 }

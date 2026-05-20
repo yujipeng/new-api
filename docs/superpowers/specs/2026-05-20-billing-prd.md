@@ -1,6 +1,6 @@
 # tcreditaim-账单 PRD（用户账单 / 渠道账单 / 全流程账单）
 
-> 日期：2026-05-20  ｜  状态：草案（待评审）  ｜  版本：v1
+> 日期：2026-05-20  ｜  状态：门 1 已通过 / 门 2 设计已闭环  ｜  版本：v1.1（基于架构师 design.md 反馈微调）
 > 关联 issue：[TES-28](mention://issue/26ce481d-8463-42de-ad03-39f6ad59686a)
 > 仓库：https://gitlab.tcredit.com/aihub/tc-token-api （上游开源参考：https://github.com/yujipeng/new-api）
 > 项目：tcreditaim-账单
@@ -39,7 +39,7 @@ tcreditaim（基于 new-api 内核的 LLM 中转平台）已运行用户 → 模
 | 护栏 | 定义 | 目标 |
 | --- | --- | --- |
 | 账单数据准确性 | 全流程账单"收入合计 / 成本合计 / 利润"与 `logs` 表逐条 SUM 的差异率 | < 0.1%（容忍浮点取整） |
-| 账单查询 P95 延迟 | 一个用户 30 天日账单列表（≤ 30 行）的 API 响应 | < 800ms（数据库无新增索引情况下 ≤ 2s 视为可接受，须在 v1.1 优化） |
+| 账单查询 P95 延迟 | 一个用户 30 天日账单列表（≤ 30 行）的 API 响应 | < 800ms（v1.0 即必须达标，物化方案设计承诺 < 500ms） |
 
 ---
 
@@ -90,7 +90,7 @@ tcreditaim（基于 new-api 内核的 LLM 中转平台）已运行用户 → 模
 > **决策已锁定（PJM 2026-05-20 12:04 确认）**：成本口径 A、月聚合 A、分组按 User.Group / Channel.Group、MVP = A+B。本方案与确认完全一致，列出仅作记录与权衡说明。
 
 - **数据模型**：
-  - 新增 `channel_pricing` 表（成本定价配置，与 `pricing` 售价表对称）。
+  - 新增 `channel_pricing` 表（成本定价配置；与 `ratio_setting` 全局售价配置概念对称，但独立持久化为 DB 表 —— 注：现有 `model/pricing.go` 是从 `ratio_setting` + `abilities` 派生的视图，并非 DB 表）。
   - 新增 `bill_daily_full` 表（全流程日账单，每行 = 日期 × 用户 × 用户分组 × 渠道 × 渠道分组 × 模型 的汇总）。
   - **用户日账单 / 渠道日账单 / 月账单**：**不物化**，按需在 `bill_daily_full` 上 SUM。
 - **写入路径**：日终离线 job（凌晨 02:00）扫描前一天 `logs` + `channel_pricing` 计算成本，回填 `bill_daily_full`。
@@ -131,7 +131,7 @@ tcreditaim（基于 new-api 内核的 LLM 中转平台）已运行用户 → 模
 
 四项锁定决策映射：
 
-1. **成本数据口径 = A**：新增 `channel_pricing` 表（与 `pricing` 售价表对称结构），按"成本定价 × tokens"计算单次成本写入 `bill_daily_full.cost`。
+1. **成本数据口径 = A**：新增 `channel_pricing` 表（与 `ratio_setting` 概念对称、独立持久化为 DB 表），按"成本定价 × tokens"计算单次成本写入 `bill_daily_full.cost`。
 2. **月账单聚合 = A**：月账单 = 该月 `bill_daily_full` 简单 SUM，不独立写入，不支持月度调账（v2 再考虑）。
 3. **分组字段 = 确认**：
    - 用户分组 = `User.Group`（注：`Log.Group` 已经在写入时落了 `User.Group` 快照，沿用即可，避免历史用户改组导致回看变化）。
@@ -194,7 +194,7 @@ tcreditaim（基于 new-api 内核的 LLM 中转平台）已运行用户 → 模
 
 - **Given** 平台存在 ≥ 100 个用户、≥ 20 个渠道
 - **When** 管理员进入"渠道账单"，选时间范围 2026-05-01 ~ 2026-05-31，按"渠道分组 = group-A"筛选
-- **Then** 页面在 P95 ≤ 2 秒内返回（30 天 × 20 渠道 × 多模型 ≤ 数千行），支持 CSV 导出
+- **Then** 页面在 P95 < 800ms 内返回（30 天 × 20 渠道 × 多模型 ≤ 数千行），支持 CSV 导出
 
 #### AC-6：CSV 导出格式
 
@@ -248,7 +248,7 @@ tcreditaim（基于 new-api 内核的 LLM 中转平台）已运行用户 → 模
 - **账单查询 P95 延迟**
   - 定义：账单列表 API 在 30 天范围请求下的 P95 响应时间。
   - 数据源：APM 监控（沿用现有 Prometheus / NewRelic，具体待运维同步，见第 11 节）。
-  - 目标：< 800ms（短期 ≤ 2s 可接受，v1.1 必须达标）。
+  - 目标：< 800ms（v1.0 即必须达标；物化方案 design.md §3 已承诺 < 500ms，留 60% 余量）。
   - 时间窗：上线后逐周观测。
 
 ---
@@ -325,16 +325,25 @@ tcreditaim（基于 new-api 内核的 LLM 中转平台）已运行用户 → 模
 
 ## 11. 待澄清项
 
-> ⚠️ 本节为 v1 PRD 中尚需后续动作澄清的事项；**不阻塞本 PRD commit**，但需在 design.md 阶段闭环。
+> ⚠️ 本节为 v1 PRD 中尚需后续动作澄清的事项。**门 2（design.md，commit `1de08263`）已闭环 #2 / #4 / #5 / #6 共 4 项 + 锁定 #3 假设**。v1.1 在此追踪剩余项的最终责任分派。
+
+### 11.1 已闭环（门 2 design.md）
+
+| # | 事项 | 闭环决策 | 来源 |
+| --- | --- | --- | --- |
+| 2 | 日切时区 | **Asia/Shanghai** | design.md §5.5 |
+| 3 | 渠道多分组拆账是否在 MVP 必要 | **否**：MVP 不支持，取 `Channel.Group` CSV 首项；v2 经 `bill_daily_full_channel_groups` 关系表扩展（PM 2026-05-20 维持架构师假设，无业务证据支撑 MVP 必要性） | PM 决策（本 commit）+ design.md §5.4 |
+| 4 | tcreditaim 客户地域 / GDPR 适用性 | **暂仅中国大陆**，不触发 GDPR；如未来出海再走单独 PRD | PM 评估 |
+| 5 | APM / 监控接入选型 | **OpenTelemetry + Prometheus + Grafana**（Grafana 默认新建独立实例，复用机会由运维定） | design.md §1.1 |
+| 6 | 历史回填窗口 | **默认 T+1 增量；可选回填 [最早可对账日, T-1] 手动触发，限 90 天** | design.md §5.5 |
+
+### 11.2 进入 plan.md 跟踪
 
 | # | 事项 | 由谁 | 何时 | 期望回答 |
 | --- | --- | --- | --- | --- |
-| 1 | 管理员对账时长基线（≥60min 是估算）需实测一次 | 运营（由 PJM 在 plan.md 中分派） | 上线前 1 周 | 给出基线 P50 数值（分钟） |
-| 2 | 日切时区（自然日定义） | 架构师 | design.md | 明确写入 design.md：日切按 Asia/Shanghai（或服务器时区，二选一） |
-| 3 | 渠道多分组拆账是否在 MVP 必要 | PJM + 运营 | PRD 评审阶段（本 commit 后 24h 内） | 是 / 否；若是则 v1 范围 +1 行 |
-| 4 | tcreditaim 客户地域是否覆盖 EU / GDPR 区 | PJM | design.md 前 | 给出地域清单；架构师据此判定 GDPR 适用性 |
-| 5 | APM / 监控接入选型 | 架构师 + 运维 | design.md | 确认 P95 延迟数据源（Prometheus / NewRelic / 其它） |
-| 6 | 历史数据回填窗口（账单从哪一天起追溯计算） | PJM + 运营 | 上线前 1 周 | 给出回填起始日；默认仅做 T+1 增量 |
+| 1 | 管理员对账时长基线（≥60min 是估算）需实测一次 | 运营（PJM 在 plan.md 中分派） | 上线前 1 周 | 给出基线 P50 数值（分钟） |
+| 7 | `channel_pricing` 存量数据录入 | **运营负责录入**，PJM 协调具体 owner；PM 提供数据源建议：① 现有供应商合同 / 采购单的定价表（财务侧）；② 各 LLM 供应商（OpenAI / Anthropic / Azure / 通义 / 智谱等）官方价目页面；③ 已有 `ratio_setting` 中的售价配置可作为模型清单参照 | 后端 CRUD API 上线后、T+1 job 首次跑通前 | 至少覆盖近 30 天调用量 Top 20 模型 × Top 5 渠道；其余走 AC-4 兜底（cost=0、WARN） |
+| 8 | LOG_DB 与主 DB 是否物理分离（生产部署） | 架构师 / 运维（plan.md 跟踪） | plan.md 阶段 | 二选一即可；design.md 已声明不依赖跨库事务，两种部署都兼容 |
 
 ---
 
@@ -345,7 +354,7 @@ channel_pricing
 ├── id
 ├── channel_id  (FK channels.id)
 ├── model_name
-├── model_ratio / model_price / completion_ratio / ...  // 结构与 pricing 表对称
+├── model_ratio / model_price / completion_ratio / ...  // 字段语义沿用 ratio_setting，独立持久化
 ├── currency  (default USD)
 └── updated_at
 

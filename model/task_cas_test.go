@@ -44,6 +44,7 @@ func TestMain(m *testing.M) {
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&ChannelPricing{},
+		&BillDailyFull{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -53,17 +54,25 @@ func TestMain(m *testing.M) {
 
 func truncateTables(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() {
-		DB.Exec("DELETE FROM tasks")
-		DB.Exec("DELETE FROM users")
-		DB.Exec("DELETE FROM tokens")
-		DB.Exec("DELETE FROM logs")
-		DB.Exec("DELETE FROM channels")
-		DB.Exec("DELETE FROM top_ups")
-		DB.Exec("DELETE FROM subscription_orders")
-		DB.Exec("DELETE FROM subscription_plans")
-		DB.Exec("DELETE FROM user_subscriptions")
-	})
+	// Pre-clean so a test sees an empty schema even if a prior test (or
+	// failure mid-flight) left rows behind without running its own Cleanup.
+	clearBillingTestTables()
+	t.Cleanup(clearBillingTestTables)
+}
+
+func clearBillingTestTables() {
+	DB.Exec("DELETE FROM tasks")
+	DB.Exec("DELETE FROM users")
+	DB.Exec("DELETE FROM tokens")
+	DB.Exec("DELETE FROM logs")
+	DB.Exec("DELETE FROM channels")
+	DB.Exec("DELETE FROM top_ups")
+	DB.Exec("DELETE FROM subscription_orders")
+	DB.Exec("DELETE FROM subscription_plans")
+	DB.Exec("DELETE FROM user_subscriptions")
+	DB.Exec("DELETE FROM channel_pricings")
+	DB.Exec("DELETE FROM bill_daily_fulls")
+	DB.Exec("DELETE FROM billing_job_runs")
 }
 
 func insertTask(t *testing.T, task *Task) {

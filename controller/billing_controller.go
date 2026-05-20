@@ -1,12 +1,14 @@
 package controller
 
 import (
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm/clause"
 )
@@ -203,4 +205,213 @@ func ListBillingJobRuns(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, rows)
+}
+
+// --- Bill Query Endpoints ---
+
+// GetUserBillDaily — current user's daily bill rows.
+// user_id is bound to the session; any query-string user_id is ignored (AC-7).
+func GetUserBillDaily(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "unauthorized"})
+		return
+	}
+	rows, err := service.QueryUserDailyBill(userId, c.Query("start"), c.Query("end"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rows)
+}
+
+func GetUserBillMonthly(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "unauthorized"})
+		return
+	}
+	rows, err := service.QueryUserMonthlyBill(userId, c.Query("month"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rows)
+}
+
+// GetAdminUserBill — admin can query any user's daily bill (includes cost/profit).
+func GetAdminUserBillDaily(c *gin.Context) {
+	userId, _ := strconv.Atoi(c.Query("user_id"))
+	if userId <= 0 {
+		common.ApiErrorMsg(c, "user_id required")
+		return
+	}
+	rows, err := service.QueryAdminUserBill(userId, c.Query("start"), c.Query("end"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rows)
+}
+
+func GetAdminUserBillMonthly(c *gin.Context) {
+	userId, _ := strconv.Atoi(c.Query("user_id"))
+	if userId <= 0 {
+		common.ApiErrorMsg(c, "user_id required")
+		return
+	}
+	rows, err := service.QueryAdminUserMonthlyBill(userId, c.Query("month"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rows)
+}
+
+func GetChannelBillDaily(c *gin.Context) {
+	channelId, _ := strconv.Atoi(c.Query("channel_id"))
+	if channelId <= 0 {
+		common.ApiErrorMsg(c, "channel_id required")
+		return
+	}
+	rows, err := service.QueryChannelDailyBill(channelId, c.Query("start"), c.Query("end"), c.Query("channel_group"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rows)
+}
+
+func GetChannelBillMonthly(c *gin.Context) {
+	channelId, _ := strconv.Atoi(c.Query("channel_id"))
+	if channelId <= 0 {
+		common.ApiErrorMsg(c, "channel_id required")
+		return
+	}
+	rows, err := service.QueryChannelMonthlyBill(channelId, c.Query("month"), c.Query("channel_group"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rows)
+}
+
+func parseFullParams(c *gin.Context) service.QueryFullParams {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	offset, _ := strconv.Atoi(c.Query("offset"))
+	userId, _ := strconv.Atoi(c.Query("user_id"))
+	channelId, _ := strconv.Atoi(c.Query("channel_id"))
+	return service.QueryFullParams{
+		Start:        c.Query("start"),
+		End:          c.Query("end"),
+		UserId:       userId,
+		ChannelId:    channelId,
+		ChannelGroup: c.Query("channel_group"),
+		UserGroup:    c.Query("user_group"),
+		ModelName:    c.Query("model_name"),
+		Limit:        limit,
+		Offset:       offset,
+	}
+}
+
+func GetFullBillDaily(c *gin.Context) {
+	p := parseFullParams(c)
+	rows, total, err := service.QueryFullDailyBill(p)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"items": rows, "total": total})
+}
+
+func GetFullBillMonthly(c *gin.Context) {
+	p := parseFullParams(c)
+	p.Start = c.Query("month")
+	rows, total, err := service.QueryFullMonthlyBill(p)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"items": rows, "total": total})
+}
+
+// --- CSV export ---
+
+func ExportBillCSV(c *gin.Context) {
+	scope := c.Query("scope")
+	if scope == "" {
+		scope = service.CSVScopeAdminFull
+	}
+	if scope != service.CSVScopeUser {
+		// Admin-only scopes — gate at handler since the route accepts both.
+		role := c.GetInt("role")
+		if role < common.RoleAdminUser {
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "admin required for this scope"})
+			return
+		}
+	}
+	start := c.Query("start")
+	end := c.Query("end")
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="`+service.CSVFilename(scope, start, end)+`"`)
+	c.Header("Cache-Control", "no-store")
+
+	var writeErr error
+	switch scope {
+	case service.CSVScopeUser:
+		userId := c.GetInt("id")
+		if userId <= 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "unauthorized"})
+			return
+		}
+		rows, err := service.QueryUserDailyBill(userId, start, end)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		writeErr = service.WriteUserBillCSV(c.Writer, rows)
+	case service.CSVScopeAdminUser:
+		userId, _ := strconv.Atoi(c.Query("user_id"))
+		if userId <= 0 {
+			common.ApiErrorMsg(c, "user_id required")
+			return
+		}
+		rows, err := service.QueryAdminUserBill(userId, start, end)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		writeErr = service.WriteAdminUserBillCSV(c.Writer, rows)
+	case service.CSVScopeChannel:
+		channelId, _ := strconv.Atoi(c.Query("channel_id"))
+		if channelId <= 0 {
+			common.ApiErrorMsg(c, "channel_id required")
+			return
+		}
+		rows, err := service.QueryChannelDailyBill(channelId, start, end, c.Query("channel_group"))
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		writeErr = service.WriteChannelBillCSV(c.Writer, rows)
+	case service.CSVScopeAdminFull:
+		p := parseFullParams(c)
+		// CSV export ignores pagination; cap at max limit
+		p.Limit = 10000
+		p.Offset = 0
+		rows, _, err := service.QueryFullDailyBill(p)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		writeErr = service.WriteAdminFullBillCSV(c.Writer, rows)
+	default:
+		common.ApiErrorMsg(c, "unknown scope: "+scope)
+		return
+	}
+
+	if writeErr != nil {
+		// Response may have been partially written — log only.
+		_ = writeErr
+	}
 }

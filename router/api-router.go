@@ -400,6 +400,14 @@ func SetApiRouter(router *gin.Engine) {
 
 			// Admin job state read (admin)
 			billingRoute.GET("/admin/job/runs", controller.ListBillingJobRuns)
+
+			// Admin bill queries (cost / profit visible)
+			billingRoute.GET("/admin/user/daily", controller.GetAdminUserBillDaily)
+			billingRoute.GET("/admin/user/monthly", controller.GetAdminUserBillMonthly)
+			billingRoute.GET("/admin/channel/daily", controller.GetChannelBillDaily)
+			billingRoute.GET("/admin/channel/monthly", controller.GetChannelBillMonthly)
+			billingRoute.GET("/admin/full/daily", controller.GetFullBillDaily)
+			billingRoute.GET("/admin/full/monthly", controller.GetFullBillMonthly)
 		}
 
 		// Billing job mutate endpoints require Root (rerun + backfill)
@@ -409,5 +417,17 @@ func SetApiRouter(router *gin.Engine) {
 			billingRootRoute.POST("/rerun", controller.RerunBillingJob)
 			billingRootRoute.POST("/backfill", controller.BackfillBillingJob)
 		}
+
+		// User-side bill queries (session-bound user_id) + CSV export
+		billingUserRoute := apiRouter.Group("/billing/user")
+		billingUserRoute.Use(middleware.UserAuth())
+		{
+			billingUserRoute.GET("/daily", controller.GetUserBillDaily)
+			billingUserRoute.GET("/monthly", controller.GetUserBillMonthly)
+		}
+
+		// CSV export — accepts both user and admin scopes; admin scopes
+		// rely on middleware.AdminAuth wrapping (see route gate below).
+		apiRouter.GET("/billing/export.csv", middleware.UserAuth(), controller.ExportBillCSV)
 	}
 }

@@ -70,7 +70,7 @@
 | `deleted_at` | gorm soft delete | 软删 |
 | `setting` | text(JSON, `dto.UserSetting`) | 含 `record_ip_log`、`notify_type`、`quota_warning_threshold` 等 |
 
-> ⚠️ **`users.setting.record_ip_log` 默认 false**。运营按 IP 排错前需要让用户在个人设置中开启，或通过后台批改 `users.setting`。详见末尾追踪表 [#7](99-pending-items.md#7-iplog-默认不记)。
+> ⚠️ **`users.setting.record_ip_log` 默认 false**（合规：GDPR / PIPL 个人信息最小化原则）。运营按 IP 排错前需要让用户在个人设置中开启，或通过后台批改 `users.setting`；历史日志补不回来。详见末尾追踪表 [#7](99-pending-items.md#7-logsip-默认不记)。
 
 ### 2.1.4 操作准则
 
@@ -129,11 +129,19 @@
 
 ```
 若 tokens.model_limits_enabled = true:
-    若 tokens.model_limits = ''  →  403 "token model limit is empty, all models are not allowed"
-    若 请求模型 ∉ tokens.model_limits  →  403
+    GetModelLimitsMap() → 解析 tokens.model_limits
+    若 model_limits = '' → GetModelLimits() 返回空切片 → limitsMap 为空 map（非 nil）
+    若 请求模型 ∉ limitsMap  →  403 i18n.MsgDistributorTokenModelForbidden
+                                  「该 token 不允许使用模型 X」
 ```
 
-> ⚠️ **`model_limits_enabled=true` 但 `model_limits=''` 是常见误操作**：前端创建令牌时勾选启用却忘填模型，整个 token 不可用且报错信息不直观。运营提醒客户：要么不启用白名单，要么至少填一个模型。详见末尾追踪表 [#8](99-pending-items.md#8-modellimits-为空-403)。
+> ⚠️ **`model_limits_enabled=true` 但 `model_limits=''` 是常见误操作**：
+>
+> 前端创建令牌时勾选启用却忘填模型 → 内部解析结果是「空 map（非 nil）」→ 任何模型查询都查不到 → 报 `MsgDistributorTokenModelForbidden`「该 token 不允许使用模型 X」。
+>
+> （注意：报错文案**不是**「token model limit is empty」，那个分支需要 `limitsMap` 为 nil 才触发，但 `GetModelLimitsMap` 始终返回非 nil map，所以实际不会走到。）
+>
+> 运营提醒客户：要么不启用白名单，要么至少填一个模型。FAQ 中给出了完整排查链，详见末尾追踪表 [#8](99-pending-items.md#8-model_limits-为空-403错误文案订正) 与第 5 章场景 4。
 
 ### 2.2.3 操作准则
 
@@ -155,9 +163,35 @@
 | 后端 controller | `controller/topup.go`（含 epay / stripe / creem / waffo 多支付方式） |
 | 数据库表 | `topup`（`model/topup.go`） |
 
-充值时的分组倍率：option key `TopupGroupRatio`，运营可对不同分组做「打折充值」。
+#### `TopupGroupRatio` 折扣 / 加价系数（**充值侧专用**）
 
-> ⚠️ `TopupGroupRatio` 在 `controller/topup.go` 的具体生效分支当前**待二次确认**。详见末尾追踪表 [#2](99-pending-items.md#2-topupgroupratio-生效路径)。
+> ✅ **`TopupGroupRatio` 仅影响充值付款金额，不影响调用计费**。计费侧（API 调用扣费）走 `GroupRatio`，两套独立。
+
+| 项 | 内容 |
+|---|---|
+| option key | `TopupGroupRatio` |
+| 默认值 | `{default:1, vip:1, svip:1}`（`common/topup-ratio.go:8-12`） |
+| 公共定价函数 | `controller/topup.go:148-176 getPayMoney` |
+| 公式 | `payMoney = amount × Price × TopupGroupRatio[user.group] × Discount` |
+| 量纲 | `amount` = 用户想充的 quota 数量；`Price` = 全局单位价（`operation_setting.Price`）；`Discount` = `operation_setting.GetPaymentSetting().AmountDiscount[amount]` 按金额阈值预设折扣 |
+| fallback | 未配置的 group 名 → fallback `1.0`（无折扣）+ 写 SysError 日志，**不阻断充值**（`common/topup-ratio.go:32-41`） |
+| 防免单 | `topupGroupRatio == 0` 强制设为 1（`controller/topup.go:158-160`） |
+
+**四条充值路径**（均会读取 `TopupGroupRatio`）：
+
+| 路径 | 文件 |
+|---|---|
+| epay | `controller/topup.go:206 RequestEpay → getPayMoney` |
+| Stripe | `controller/topup_stripe.go:389, 403`（直接 `GetTopupGroupRatio`） |
+| Waffo | `controller/topup_waffo.go:82` |
+| Waffo-Pancake | `controller/topup_waffo_pancake.go:59` |
+
+**运营怎么用**：
+
+- `TopupGroupRatio['vip'] = 0.9` → vip 用户付 90% 的钱拿到相同 quota（**充值打折**）。
+- `TopupGroupRatio['svip'] = 1.2` → svip 用户付 120% 的钱拿到相同 quota（**加价订阅** / 高级套餐）。
+- 配置入口：`/system-settings/billing/group-pricing` 的 `TopupGroupRatio` 区块；存储于 `options.TopupGroupRatio`。
+- 上线新充值倍率前**做一次端到端小额充值测试**（如 1 USD），核对到账 quota 是否符合预期。
 
 ### 2.3.2 兑换码（运营批量发码）
 

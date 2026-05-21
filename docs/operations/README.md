@@ -17,7 +17,7 @@
 | 3 | [`03-billing.md`](03-billing.md) | 计费规则（标准 / 分级 / 音频 / 任务，含人话版与原始公式 + 量纲） |
 | 4 | [`04-logs-stats.md`](04-logs-stats.md) | 日志与数据看板（`logs` / `quota_data` 表 + 前端入口 + 统计口径） |
 | 5 | [`05-faq.md`](05-faq.md) | 常见运营场景速查 / 排错（13 条灰区翻译为运营行动建议） |
-| 99 | [`99-pending-items.md`](99-pending-items.md) | 待确认事项追踪表（架构师责任人，open / closed 状态） |
+| 99 | [`99-pending-items.md`](99-pending-items.md) | 灰区证据闭环追踪表（13 条全部闭环）+ 已知改进点附录（PJM 另开 issue 跟踪） |
 
 ---
 
@@ -47,7 +47,7 @@
 - 本手册落在仓库 `docs/operations/` 目录。
 - 文档变更走 `feature/<topic>` 分支，**禁止直接 push 到 main / develop**（v5 规约）。
 - 三方一致性反馈（PRD ↔ 文档 ↔ 代码）通过父 issue 评论上报对应责任人。
-- 待确认事项不散落正文，统一进 [`99-pending-items.md`](99-pending-items.md)；正文相关位置仅做「⚠️ 详见末尾追踪表 #N」标注。
+- 灰区结论与已知改进点统一进 [`99-pending-items.md`](99-pending-items.md)；正文相关位置仅做「⚠️ 详见末尾追踪表 #N」标注。
 
 ---
 

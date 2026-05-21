@@ -72,7 +72,7 @@
 > 1. 让客户在个人设置开启 IP 日志，或
 > 2. 后台批改 `users.setting.record_ip_log = true`。
 >
-> 详见末尾追踪表 [#7](99-pending-items.md#7-iplog-默认不记)。
+> 详见末尾追踪表 [#7](99-pending-items.md#7-logsip-默认不记)。
 
 ### 4.1.5 日志清理
 
@@ -129,9 +129,11 @@
 > 🔴 **关键运营提醒**：`logs.group` 写的是**最终 usingGroup**。
 >
 > 客户原本在 `vip` 但调用时令牌切到 `svip` → `logs.group = 'svip'`。
-> 想分开看「以 vip 身份切到 svip」与「直接 svip 用户」当前**做不到**——因为 user_group 与 token_group **未单独落库**，只在 `other.group_ratio_special` 命中 GroupGroupRatio 时写一处。
+> 想分开看「以 vip 身份切到 svip」与「直接 svip 用户」当前**做不到** — 因为 user_group 与 token_group **未单独落库**，只在 `other.group_ratio_special` 命中 GroupGroupRatio 时写一处。
 >
-> 详见末尾追踪表 [#10](99-pending-items.md#10-logsgroup-无法区分-user-vs-token-切换)。
+> **追溯切组路径**：打开日志详情查 `other.user_group / other.token_group`（**待 logs.other 扩展后可用**，详见 `99-pending-items.md` 附录 A 跟踪 issue）。当前期间，按用户 ID + 令牌 ID 维度聚合是 workaround。
+>
+> 详见末尾追踪表 [#10](99-pending-items.md#10-logsgroup-仅记-usinggroup)。
 
 ---
 
@@ -152,8 +154,9 @@ tpm   = sum(prompt_tokens) + sum(completion_tokens)
         WHERE type=2 AND created_at >= now-60s
 ```
 
-> ⚠️ **`rpm` / `tpm` 是「最近 60 秒」的截面**，不是用户选定时间区间的平均（`model/log.go:482`）。
-> controller 返回的字段名只叫 `rpm/tpm`，前端可能误解。运营对外解释时务必声明这一点。
+> ⚠️ **`rpm` / `tpm` 是「截面值，按最近 60 秒计算」**（`model/log.go:482`），不是用户选定时间区间的平均。
+> controller 返回的字段名只叫 `rpm/tpm`，前端可能误解。**运营对外解释时务必显式说「按最近 60 秒计算」**。
+> 区间均值需自跑 SQL（见第 5 章 5.4 常用查询）。
 > 详见末尾追踪表 [#11](99-pending-items.md#11-rpmtpm-是-60-秒截面)。
 
 ---
@@ -203,9 +206,15 @@ tpm   = sum(prompt_tokens) + sum(completion_tokens)
 
 ### 4.4.5 表清理
 
-> ⚠️ **`quota_data` 表代码中未发现 DELETE 入口**（`model/usedata.go` 全文 138 行，只有 INSERT / UPDATE / SELECT）。
-> 长期运行的实例（5+ 年）这张表会无限增长，需要 DBA 介入做归档。
-> 详见末尾追踪表 [#12](99-pending-items.md#12-quotadata-无清理路径)。
+> ⚠️ **`quota_data` 表暂无清理入口，长生命周期实例需 DBA 手动维护**：
+>
+> - `model/usedata.go` 全文 138 行，只有 INSERT / UPDATE / SELECT（`grep -n "DELETE|Delete|truncate"` 0 匹配）。
+> - `controller/log.go:153 DeleteHistoryLogs` 只清 `logs` 表，不动 `quota_data`。
+> - 量级评估：每用户每模型每小时 1 行，10000 用户 × 20 模型 × 24h × 365 天 ≈ 17 亿行；**1 年以内通常无影响，5+ 年级别会达瓶颈**。
+> - 建议每 6 个月由 DBA 手动归档 12 个月以前的行。
+>
+> 后续将由代码层补清理接口（`99-pending-items.md` 附录 A5），届时本提示失效。
+> 详见末尾追踪表 [#12](99-pending-items.md#12-quota_data-表无清理路径)。
 
 ---
 

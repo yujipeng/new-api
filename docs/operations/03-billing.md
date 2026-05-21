@@ -39,7 +39,7 @@ NewAPI 的标准计费可以拆成三层：
  = (输入 token × ModelRatio) + (输出 token × CompletionRatio × ModelRatio)
    + 工具调用次数费用 + 音频独立计费
  × GroupRatio（分组倍率）
- × 一连串 OtherRatios（其他倍率，目前通常为 1）
+ × ∏ OtherRatios（任务/图像类的动态参数倍率，详见 3.1.3；文本路径当前为 no-op）
 ```
 
 **关键点（运营要会说清）**：
@@ -105,7 +105,52 @@ quota = round( ModelPrice × QuotaPerUnit × GroupRatio
 
 按次价场景：模型在 `ModelPrice` 中显式注册了价格，**整请求只按这个价**收费，与 token 数无关（但仍叠加工具与音频费）。
 
-> ⚠️ `OtherRatios` 连乘当前没有赋值路径、没有前端入口，**疑似预留字段，运营无需配置**。详见末尾追踪表 [#9](99-pending-items.md#9-otherratios-疑似预留)。
+### 3.1.3 关于 `OtherRatios`（任务/图像类计费的动态参数倍率）
+
+> ✅ **运营无需也不能在前端配置 `OtherRatios`**。它由 adapter 根据用户请求参数（视频 `seconds`/`size`、图像 `n` / `prompt_extend`）自动计算。详见末尾追踪表 [#9](99-pending-items.md#9-otherratios任务图像类计费的动态参数倍率)。
+
+| 项 | 内容 |
+|---|---|
+| 类型 | `types.PriceData.OtherRatios map[string]float64`，赋值入口 `AddOtherRatio(key, value)` |
+| 任务路径主流程 | `relay/relay_task.go:144-203 RelayTaskSubmit` — 步骤 5 `adaptor.EstimateBilling` 返回参数键值；步骤 6 `Quota *= ratio`（连乘）；步骤 11 `AdjustBillingOnSubmit` 校准 |
+| 任务路径公式 | **基础 Quota × ∏(OtherRatios)** |
+| 实际赋值的 adapter | OpenAI Sora（`relay/channel/task/sora/adaptor.go:97-130`）/ 阿里通义视频（`relay/channel/task/ali/adaptor.go:193`）/ Gemini Veo（`relay/channel/task/gemini/adaptor.go:160`）/ Vertex Veo（`relay/channel/task/vertex/adaptor.go:124`）/ 阿里图像（`relay/channel/ali/image.go:53,58,331,333` + `image_wan.go:37`）/ 通用图像（`relay/image_handler.go:124-125`） |
+| 文本路径 | `service/text_quota.go:281-285` 中保留 `Π OtherRatios` 连乘**位**，但当前文本 adapter 未赋值 → 连乘为 no-op（**不是废弃字段**，是统一公式预留位） |
+| 透出 | HTTP 头 `X-New-Api-Other-Ratios`（`relay/relay_task.go:234`）；日志 `logs.other` 写入命中明细（`service/task_billing.go:26-29, 128-129, 286-289`） |
+| 运营提示 | 任务/视频/图像扣费高于预期时，先看 `logs.other.OtherRatios` 字段确认命中了哪些动态倍率（`seconds × size × ...`） |
+
+### 3.1.4 未注册到 ModelRatio 的模型扣费行为（**两路径不对称**）
+
+> 🔴 **结论先行**：所有上线模型必须在 `ModelRatio`（或 `ModelPrice`）显式注册。不要依赖 37.5 默认值。详见末尾追踪表 [#1](99-pending-items.md#1-未注册模型默认倍率两路径不对称)。
+
+证据：`setting/ratio_setting/model_ratio.go:403-417 GetModelRatio` 在模型未注册时返回 `(37.5, operation_setting.SelfUseModeEnabled, name)`。第二个返回值是「闸门」，**不是「真的按 37.5 扣」**。
+
+**文本路径（OpenAI / Claude / Gemini）：两道闸门**
+
+证据：`relay/helper/price.go:95-104, 182-191`。装载顺序：
+
+```
+未注册模型请求到达
+ ├─ 闸门 1（系统级）：SelfUseModeEnabled?
+ │     ├─ 是 → 按 37.5 倍率计费
+ │     └─ 否 ↓
+ ├─ 闸门 2（用户级）：dto.UserSetting.AcceptUnsetRatioModel?
+ │     ├─ 是 → 按 37.5 倍率计费
+ │     └─ 否 ↓
+ └─ 返回 modelPriceNotConfiguredError（relay/helper/price.go:20-33）
+       └─ HTTP 拒绝调用
+```
+
+**音频 / Realtime / 异步任务路径：无闸门**
+
+证据：`service/quota.go:109 modelRatio, _, _ := ratio_setting.GetModelRatio(modelName)`、`service/task_billing.go:258`、`controller/task_video.go:159`。这些路径调用 `GetModelRatio` 时**忽略 success 返回值**，未注册模型直接按 37.5 倍率静默扣费，绕过两道闸门。
+
+**运营建议**：
+
+1. 任何上线模型在 `/system-settings/billing/model-pricing` 中显式注册 `ModelRatio` 或 `ModelPrice`。
+2. 不要在生产环境长期开启系统级 `SelfUseMode`（仅自用 / 调试场景使用）。
+3. 不要替客户开启用户级 `AcceptUnsetRatioModel`，让客户自主决定是否接受未配置价格的模型。
+4. 「音频/任务路径无闸门」是已知不对称，将由后续修复（`99-pending-items.md` 附录 A1）对齐。
 
 ---
 

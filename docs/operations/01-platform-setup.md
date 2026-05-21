@@ -161,7 +161,14 @@ option key 列表（来自 `model/option.go:150-153, 508-509`）：
 - 运行时入口：`service/tiered_settle.go:95 TryTieredSettle`，在标准计费完成后调用，命中则**覆盖** `summary.Quota`（`service/text_quota.go:340-346`、`service/quota.go:202-205`）。
 - 一次请求内倍率不变：`relayInfo.TieredBillingSnapshot.ExprString` 在请求前置阶段冻结。
 
-⚠️ 未注册到 ModelRatio 的模型扣费行为存在不确定性，详见末尾追踪表 [#1](99-pending-items.md#1-未注册模型默认倍率)。
+> 🔴 **未注册到 `ModelRatio` 的模型走两路径不对称扣费**：
+>
+> - **文本路径**（OpenAI / Claude / Gemini）：两道闸门兜底 — ① 系统级 `SelfUseMode` ② 用户级 `AcceptUnsetRatioModel`。两者都关 → 直接 HTTP 拒绝调用；任一开启 → 按 37.5 倍率扣费。
+> - **音频 / Realtime / 异步任务路径**：**无闸门**，未注册模型直接按 37.5 倍率静默扣费（已知不对称）。
+>
+> 运营建议：所有上线模型必须在 `/system-settings/billing/model-pricing` 显式注册 `ModelRatio` 或 `ModelPrice`，不要依赖 37.5 默认值。
+>
+> 详细公式与代码证据见第 3 章 [3.1.4](03-billing.md#314-未注册到-modelratio-的模型扣费行为两路径不对称)，跟踪信息见末尾追踪表 [#1](99-pending-items.md#1-未注册模型默认倍率两路径不对称)。
 
 ---
 
@@ -226,11 +233,18 @@ NewAPI 共有 **3 层 group 概念**，全部以 JSON 形式存于 `options` 表
 
 ### 1.3.5 操作准则
 
-> 🔴 **更新 `GroupRatio` 时必须同步更新 `UserUsableGroups`**。
+> 🔴 **更新 `GroupRatio` 时必须同步更新 `UserUsableGroups`**（双写约束）。
 > `middleware/auth.go:391-396` 要求 `tokens.group` 同时在两套配置里出现，否则用户报 403（除 `auto` 分组外）。
+> **前端自动联动校验尚未实现**，两 tab 分别保存，运营需自行核对。
 > 详见末尾追踪表 [#5](99-pending-items.md#5-groupratio-与-userusablegroups-必须双写)。
 
-> ⚠️ **默认 SVIP 分组无法直接使用**：后端默认在 `GroupRatio` 注册了 `default/vip/svip`（值都为 1），但 `UserUsableGroups` 默认只放 `default/vip`（`setting/user_usable_group.go:10-13`）。也就是说**SVIP 默认不可被令牌切换到**，需运营手动加入 `UserUsableGroups`。详见末尾追踪表 [#6](99-pending-items.md#6-svip-默认半启用)。
+> 🔴 **修改 `GroupRatio` 时必须同步检查所有 `channels.group` 引用**。
+> 未在 `GroupRatio` 注册的 group 名出现在 `channels.group` 中时，调用会按 1 倍**静默计费**（`setting/ratio_setting/group_ratio.go:84-91`，仅打 SysLog，不阻断）。
+> 详见末尾追踪表 [#3](99-pending-items.md#3-未注册-groupratio-默默按-1-倍计费)。
+
+> ⚠️ **默认 SVIP 分组无法直接使用**（首次部署 workaround）：后端默认在 `GroupRatio` 注册了 `default/vip/svip`（值都为 1），但 `UserUsableGroups` 默认只放 `default/vip`（`setting/user_usable_group.go:10-13`）。也就是说**SVIP 默认不可被令牌切换到**，需运营手动在 `/system-settings/billing/group-pricing` 把 `svip` 加入 `UserUsableGroups`。
+> （后续版本可能对齐默认值，届时本 workaround 自动失效，详见 `99-pending-items.md` 附录 A2。）
+> 详见末尾追踪表 [#6](99-pending-items.md#6-svip-默认半启用)。
 
 ---
 
@@ -309,7 +323,15 @@ NewAPI 共有 **3 层 group 概念**，全部以 JSON 形式存于 `options` 表
 
 `FixAbility`（`model/ability.go:287-341`）= **truncate `abilities` 表 + 按所有 channel 重建**。前端「修复」按钮调用，路径 `POST /api/channel/fix`。
 
-> ⚠️ 高并发下 `FixAbility` 与渠道写入并发，可能出现短暂不一致。详见末尾追踪表 [#4](99-pending-items.md#4-fixability-高并发不一致)。
+> 🔴 **FixAbility 执行期间所有请求会 503**：
+>
+> - 已加进程级 `sync.Mutex`（`model/ability.go:285 fixLock`） — `TryLock()` 失败直接返回「已经有一个修复任务在运行中」。
+> - 但**无跨进程锁**：单实例 OK；多实例集群下两节点同时点修复仍可能并发。
+> - 单实例下执行期间（清空 → 重建完成）`abilities` 表为空 → `CacheGetRandomSatisfiedChannel` 全部 miss → 所有请求返回 503。
+>
+> **运营建议**：选低峰期单实例操作；点完后等 1 分钟再用测试令牌验证一次；集群部署需运维分时（不要同一时刻多节点点修复）。
+>
+> 详见末尾追踪表 [#4](99-pending-items.md#4-fixability-高并发不一致)。
 
 ### 1.4.4 完整调用链速记
 

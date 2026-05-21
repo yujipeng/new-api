@@ -131,7 +131,7 @@
 > 客户原本在 `vip` 但调用时令牌切到 `svip` → `logs.group = 'svip'`。
 > 想分开看「以 vip 身份切到 svip」与「直接 svip 用户」当前**做不到** — 因为 user_group 与 token_group **未单独落库**，只在 `other.group_ratio_special` 命中 GroupGroupRatio 时写一处。
 >
-> **追溯切组路径**：打开日志详情查 `other.user_group / other.token_group`（**待 logs.other 扩展后可用**，详见 `99-pending-items.md` 附录 A 跟踪 issue）。当前期间，按用户 ID + 令牌 ID 维度聚合是 workaround。
+> **追溯切组路径**：打开日志详情查 `other.user_group / other.token_group`。当前期间，按用户 ID + 令牌 ID 维度聚合是 workaround。
 >
 > 详见末尾追踪表 [#10](99-pending-items.md#10-logsgroup-仅记-usinggroup)。
 

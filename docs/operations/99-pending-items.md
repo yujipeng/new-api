@@ -15,7 +15,7 @@
 |---|---|
 | **现象描述** | `setting/ratio_setting/model_ratio.go:403-417 GetModelRatio` 在模型未注册时返回 `(37.5, operation_setting.SelfUseModeEnabled, name)`。第二个返回值是「闸门」，不是「真正生效」。 |
 | **证据链** | <ul><li>**文本路径（OpenAI / Claude / Gemini）有两道闸门**（`relay/helper/price.go:95-104, 182-191`）：① 系统级 `SelfUseModeEnabled` ② 用户级 `dto.UserSetting.AcceptUnsetRatioModel`（`dto/user_settings.go:14`）。两者都关 → 返回 `modelPriceNotConfiguredError`（`relay/helper/price.go:20-33`）拒绝调用。</li><li>**音频/Realtime/异步任务路径**（`service/quota.go:109`、`service/task_billing.go:258`、`controller/task_video.go:159`）调用 `GetModelRatio` 时**忽略 success 返回值**，未注册模型直接按 37.5 倍率静默扣费。</li></ul> |
-| **当前手册措辞** | 第 1 章 1.2.4 + 第 3 章 3.1.4 + 第 5 章场景 1：分文本路径与音频/任务路径分别说明扣费行为。 |
+| **当前手册措辞** | 第 1 章 1.2.4 + 第 3 章 3.1.5 + 第 5 章场景 1：分文本路径与音频/任务路径分别说明扣费行为。 |
 | **处置结论** | 不依赖默认 37.5 倍率，所有上线模型必须在 `ModelRatio` / `ModelPrice` 显式注册。运营无需关心系统级 / 用户级闸门，注册即可避免任何不确定。 |
 | **状态** | `closed-2026-05-21` |
 

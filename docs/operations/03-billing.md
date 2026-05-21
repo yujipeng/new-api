@@ -105,7 +105,7 @@ quota = round( ModelPrice × QuotaPerUnit × GroupRatio
 
 按次价场景：模型在 `ModelPrice` 中显式注册了价格，**整请求只按这个价**收费，与 token 数无关（但仍叠加工具与音频费）。
 
-### 3.1.3 关于 `OtherRatios`（任务/图像类计费的动态参数倍率）
+### 3.1.4 关于 `OtherRatios`（任务/图像类计费的动态参数倍率）
 
 > ✅ **运营无需也不能在前端配置 `OtherRatios`**。它由 adapter 根据用户请求参数（视频 `seconds`/`size`、图像 `n` / `prompt_extend`）自动计算。详见末尾追踪表 [#9](99-pending-items.md#9-otherratios任务图像类计费的动态参数倍率)。
 
@@ -119,7 +119,7 @@ quota = round( ModelPrice × QuotaPerUnit × GroupRatio
 | 透出 | HTTP 头 `X-New-Api-Other-Ratios`（`relay/relay_task.go:234`）；日志 `logs.other` 写入命中明细（`service/task_billing.go:26-29, 128-129, 286-289`） |
 | 运营提示 | 任务/视频/图像扣费高于预期时，先看 `logs.other.OtherRatios` 字段确认命中了哪些动态倍率（`seconds × size × ...`） |
 
-### 3.1.4 未注册到 ModelRatio 的模型扣费行为（**两路径不对称**）
+### 3.1.5 未注册到 ModelRatio 的模型扣费行为（**两路径不对称**）
 
 > 🔴 **结论先行**：所有上线模型必须在 `ModelRatio`（或 `ModelPrice`）显式注册。不要依赖 37.5 默认值。详见末尾追踪表 [#1](99-pending-items.md#1-未注册模型默认倍率两路径不对称)。
 

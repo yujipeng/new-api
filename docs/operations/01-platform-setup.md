@@ -168,7 +168,7 @@ option key 列表（来自 `model/option.go:150-153, 508-509`）：
 >
 > 运营建议：所有上线模型必须在 `/system-settings/billing/model-pricing` 显式注册 `ModelRatio` 或 `ModelPrice`，不要依赖 37.5 默认值。
 >
-> 详细公式与代码证据见第 3 章 [3.1.4](03-billing.md#314-未注册到-modelratio-的模型扣费行为两路径不对称)，跟踪信息见末尾追踪表 [#1](99-pending-items.md#1-未注册模型默认倍率两路径不对称)。
+> 详细公式与代码证据见第 3 章 [3.1.5](03-billing.md#315-未注册到-modelratio-的模型扣费行为两路径不对称)，跟踪信息见末尾追踪表 [#1](99-pending-items.md#1-未注册模型默认倍率两路径不对称)。
 
 ---
 

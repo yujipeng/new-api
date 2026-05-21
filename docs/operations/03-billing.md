@@ -39,7 +39,7 @@ NewAPI 的标准计费可以拆成三层：
  = (输入 token × ModelRatio) + (输出 token × CompletionRatio × ModelRatio)
    + 工具调用次数费用 + 音频独立计费
  × GroupRatio（分组倍率）
- × ∏ OtherRatios（任务/图像类的动态参数倍率，详见 3.1.3；文本路径当前为 no-op）
+ × ∏ OtherRatios（任务/图像类的动态参数倍率，详见 3.1.4；文本路径当前为 no-op）
 ```
 
 **关键点（运营要会说清）**：

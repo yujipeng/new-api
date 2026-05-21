@@ -111,7 +111,7 @@
 |---|---|
 | **现象描述** | `service/text_quota.go:281-285` 文本路径连乘 `Π OtherRatios`，但首轮未找到赋值路径与前端入口。 |
 | **证据链** | <ul><li>**OtherRatios 不是预留字段，而是任务/图像计费的活跃路径**。</li><li>类型：`types.PriceData.OtherRatios map[string]float64`，赋值入口 `AddOtherRatio(key, value)`（`relay/relay_task.go:113, 192` 等）。</li><li>任务主流程：`relay/relay_task.go:144-203 RelayTaskSubmit` — 步骤 5 `adaptor.EstimateBilling` 返回 `{"seconds": N, "size": M}` 等键值；步骤 6 `Quota *= ratio`（连乘所有 OtherRatios 值）；步骤 11 `AdjustBillingOnSubmit` 校准。</li><li>实际赋值的 adapter：`relay/channel/task/sora/adaptor.go:97-130`（OpenAI Sora）、`relay/channel/task/ali/adaptor.go:193`（阿里通义视频）、`relay/channel/task/gemini/adaptor.go:160`（Veo）、`relay/channel/task/vertex/adaptor.go:124`（Vertex Veo）、`relay/channel/ali/image.go:53,58,331,333` + `image_wan.go:37`（图像 `n` / `prompt_extend`）、`relay/image_handler.go:124-125`（通用图像 `n`）。</li><li>透出：HTTP 头 `X-New-Api-Other-Ratios`（`relay/relay_task.go:234`）；日志 `logs.other` 记录命中明细（`service/task_billing.go:26-29, 128-129, 286-289`）。</li><li>文本路径中的 for 循环是统一公式预留位，文本 adapter 当前未赋值，连乘为 no-op，但**不是废弃字段**。</li></ul> |
-| **当前手册措辞** | 第 3 章 3.1.3 + 灰区表 #9：明确为「任务/图像类计费的动态参数倍率」，由 adapter 根据用户请求参数（视频 `seconds`/`size`，图像 `n`）自动计算；运营**无需也不能**手动配置；日志 `other` JSON 字段记录明细。 |
+| **当前手册措辞** | 第 3 章 3.1.4 + 灰区表 #9：明确为「任务/图像类计费的动态参数倍率」，由 adapter 根据用户请求参数（视频 `seconds`/`size`，图像 `n`）自动计算；运营**无需也不能**手动配置；日志 `other` JSON 字段记录明细。 |
 | **处置结论** | 无前端入口是设计意图，运营无需配置。 |
 | **状态** | `closed-2026-05-21` |
 
